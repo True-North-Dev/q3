@@ -1,0 +1,54 @@
+name: Build and Push to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set tag from branch or release
+        id: vars
+        run: |
+          TAG="latest"
+          if [[ "${{ github.ref }}" == refs/heads/staging ]]; then
+            TAG="staging"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image
+        run: |
+          docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }} .
+
+      - name: Tag image for ECR
+        run: |
+          docker tag ${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }} \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }}
+
+      - name: Push to ECR
+        run: |
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }}
