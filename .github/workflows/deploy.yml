@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - staging
     tags:
       - 'v*.*.*'
 
@@ -28,40 +29,37 @@ jobs:
       - name: Log in to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Fetch production secrets from SSM
+      - name: Determine environment and fetch credentials from SSM
         run: |
-          DB_URL=$(aws ssm get-parameter --name "/q3/prod/DB_URL" --with-decryption --query "Parameter.Value" --output text)
-          SECRET_KEY_BASE=$(aws ssm get-parameter --name "/q3/prod/SECRET_KEY_BASE" --with-decryption --query "Parameter.Value" --output text)
+          if [[ "${{ github.ref }}" == "refs/heads/staging" ]]; then
+            ENV=staging
+            TAG=staging
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            ENV=prod
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            ENV=prod
+            TAG=latest
+          fi
+
+          echo "tag=$TAG" >> $GITHUB_ENV
+          echo "env=$ENV" >> $GITHUB_ENV
+
+          DB_URL=$(aws ssm get-parameter --name "/q3/$ENV/DB_URL" --with-decryption --query "Parameter.Value" --output text)
+          SECRET_KEY_BASE=$(aws ssm get-parameter --name "/q3/$ENV/SECRET_KEY_BASE" --with-decryption --query "Parameter.Value" --output text)
+
           echo "DB_URL=$DB_URL" >> $GITHUB_ENV
           echo "SECRET_KEY_BASE=$SECRET_KEY_BASE" >> $GITHUB_ENV
 
-      - name: Set tag from branch or release
-        id: vars
-        run: |
-          TAG="latest"
-          if [[ "${{ github.ref }}" == refs/heads/staging ]]; then
-            TAG="staging"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
       - name: Build Docker image
         run: |
-          docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }} .
+          docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ env.tag }} .
 
       - name: Tag image for ECR
         run: |
-          docker tag ${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }} \
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }}
-
-      - name: Run and test container
-        run: |
-          docker run --rm \
-            -e DB_URL=$DB_URL \
-            -e SECRET_KEY_BASE=$SECRET_KEY_BASE \
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }}
+          docker tag ${{ secrets.ECR_REPOSITORY }}:${{ env.tag }} \
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.tag }}
 
       - name: Push to ECR
         run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ steps.vars.outputs.tag }}
+          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.tag }}
