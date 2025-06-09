@@ -31,6 +31,8 @@ jobs:
 
       - name: Determine environment and fetch credentials from SSM
         run: |
+          SHORT_SHA=$(echo "${GITHUB_SHA}" | cut -c1-7)
+
           if [[ "${{ github.ref }}" == "refs/heads/staging" ]]; then
             ENV=staging
             TAG=staging
@@ -44,6 +46,7 @@ jobs:
 
           echo "tag=$TAG" >> $GITHUB_ENV
           echo "env=$ENV" >> $GITHUB_ENV
+          echo "sha=$SHORT_SHA" >> $GITHUB_ENV
 
           DB_URL=$(aws ssm get-parameter --name "/q3/$ENV/DB_URL" --with-decryption --query "Parameter.Value" --output text)
           SECRET_KEY_BASE=$(aws ssm get-parameter --name "/q3/$ENV/SECRET_KEY_BASE" --with-decryption --query "Parameter.Value" --output text)
@@ -55,11 +58,28 @@ jobs:
         run: |
           docker build -t ${{ secrets.ECR_REPOSITORY }}:${{ env.tag }} .
 
+      - name: Print staging credentials (debug only)
+        run: |
+          echo "DB_URL=$DB_URL"
+          echo "SECRET_KEY_BASE=$SECRET_KEY_BASE"
+
+      - name: Debug tag and env
+        run: |
+          echo "ENV=${{ env.env }}"
+          echo "TAG=${{ env.tag }}"
+          echo "SHA=${{ env.sha }}"
+
+
       - name: Tag image for ECR
         run: |
-          docker tag ${{ secrets.ECR_REPOSITORY }}:${{ env.tag }} \
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.tag }}
+          BASE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}
+          
+          docker tag ${{ secrets.ECR_REPOSITORY }}:${{ env.tag }} $BASE:${{ env.sha }}
+          docker tag ${{ secrets.ECR_REPOSITORY }}:${{ env.tag }} $BASE:${{ env.tag }}
 
-      - name: Push to ECR
+      - name: Push image to ECR
         run: |
-          docker push ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}:${{ env.tag }}
+          BASE=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ secrets.ECR_REPOSITORY }}
+          
+          docker push $BASE:${{ env.tag }}
+          docker push $BASE:${{ env.sha }}
