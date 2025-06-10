@@ -36,12 +36,15 @@ jobs:
           if [[ "${{ github.ref }}" == "refs/heads/staging" ]]; then
             ENV=staging
             TAG=staging
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            ENV=prod
+            TAG=latest
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             ENV=prod
             TAG="${GITHUB_REF#refs/tags/}"
           else
-            ENV=prod
-            TAG=latest
+            echo "Unsupported branch/tag: ${{ github.ref }}"
+            exit 1
           fi
 
           echo "tag=$TAG" >> $GITHUB_ENV
@@ -83,3 +86,23 @@ jobs:
           
           docker push $BASE:${{ env.tag }}
           docker push $BASE:${{ env.sha }}
+
+      # - name: Submit AWS Batch staging job
+      #   if: github.ref == 'refs/heads/staging'
+      #   run: |
+      #     JOB_NAME=q3-staging-${{ github.run_id }}
+      #     QUEUE_NAME=q3-staging-queue
+      #     JOB_DEF_NAME=q3-job-staging
+
+      #     echo "Submitting AWS Batch job: $JOB_NAME"
+          
+      #     aws batch submit-job \
+      #       --job-name "$JOB_NAME" \
+      #       --job-queue "$QUEUE_NAME" \
+      #       --job-definition "$JOB_DEF_NAME" \
+      #       --container-overrides '{
+      #         "environment": [
+      #           { "name": "DB_URL", "value": "'"${{ env.DB_URL }}"'" },
+      #           { "name": "SECRET_KEY_BASE", "value": "'"${{ env.SECRET_KEY_BASE }}"'" }
+      #         ]
+      #       }'
